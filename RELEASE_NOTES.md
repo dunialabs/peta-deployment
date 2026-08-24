@@ -9,8 +9,11 @@ Peta 1.3.0 is a coordinated release of Core, Console, Auth, and the unified depl
 - Hardened OAuth, public URL handling, token masking, and persistent log redaction across gateway paths.
 - Updated Console create/edit flows and API handlers for protocol selection, remote launch configuration, and unknown MCP capability round trips.
 - Made the Console image reproducible from a clean checkout while preserving the published image's offline tool-template fallback.
+- Removed repository TLS credentials from Console release sources and excluded local key/certificate files from Git and Docker build contexts. Rotate any previously deployed copy of that credential.
+- Patched production-reachable denial-of-service dependencies in Core Socket.IO/ZIP handling and Console Next.js, HTTP, and YAML processing.
 - Added HubSpot and Canva providers to Peta Auth. The Auth runtime payload is unchanged from the existing production image and is promoted to the coordinated `1.3.0` tag after health and architecture verification.
 - Changed the unified macOS, Linux, and Windows installers to pin Core, Console, and Auth to one `PETA_VERSION` instead of mutable `latest` tags.
+- Changed installer secret generation to use operating-system cryptographic randomness and restrict generated `.env` files to the current user.
 
 ## MCP compatibility scope
 

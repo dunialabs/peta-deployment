@@ -68,9 +68,15 @@ function Log-Step {
 function Generate-Password {
     param([int]$Length = 32)
 
-    $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    $password = -join ((1..$Length) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
-    return $password
+    $bytes = New-Object byte[] $Length
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    }
+    finally {
+        $rng.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes).Substring(0, $Length)
 }
 
 # Check if command exists
@@ -632,6 +638,16 @@ LOG_SYNC_RETRY_ATTEMPTS=2
     }
 
     Set-Content -Path $envFile -Value $content -Encoding UTF8
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetOwner([System.Security.Principal.WindowsIdentity]::GetCurrent().User)
+    $acl.SetAccessRuleProtection($true, $false)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        [System.Security.Principal.WindowsIdentity]::GetCurrent().User,
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.AccessControlType]::Allow
+    )
+    $acl.AddAccessRule($rule)
+    Set-Acl -Path $envFile -AclObject $acl
     Log-Success ".env file generated successfully"
     Log-Warn "Please keep the .env file secure, it contains sensitive password information"
 }

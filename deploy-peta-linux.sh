@@ -110,12 +110,11 @@ start_docker_service() {
 # Generate random password
 generate_password() {
     local length=${1:-32}
-    if command -v openssl &> /dev/null; then
-        openssl rand -base64 $length | tr -d "=+/" | cut -c1-$length
-    else
-        # fallback
-        echo "$(date +%s)${RANDOM}${RANDOM}" | md5sum 2>/dev/null | cut -c1-$length || echo "change-this-secret-$(date +%s)"
+    if ! command -v openssl &> /dev/null; then
+        log_error "openssl is required to generate deployment secrets securely"
+        return 1
     fi
+    openssl rand -base64 $length | tr -d "=+/" | cut -c1-$length
 }
 
 # Check if command exists
@@ -557,6 +556,7 @@ generate_env_file() {
     local env_file=".env"
 
     log_step "Generating .env file"
+    umask 077
 
     # Generate file header
     cat > "$env_file" <<EOF
@@ -684,6 +684,7 @@ EOF
     fi
 
     log_success ".env file generated successfully"
+    chmod 600 "$env_file"
     log_warn "Please keep the .env file secure, it contains sensitive password information"
 }
 
@@ -1089,7 +1090,7 @@ main() {
 }
 
 # Error handling
-trap 'log_error "Error occurred during deployment, please check logs"; exit 1' ERR
-
-# Run main function
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    trap 'log_error "Error occurred during deployment, please check logs"; exit 1' ERR
+    main "$@"
+fi

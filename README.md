@@ -36,7 +36,7 @@ PETA_VERSION=1.3.0 ./deploy-peta.sh
 $env:PETA_VERSION = '1.3.0'; .\deploy-peta.ps1
 ```
 
-The generated `.env` records `PETA_VERSION`; keep it and the generated database credentials private.
+The generated `.env` records `PETA_VERSION` and is restricted to the current OS user because it contains database and application secrets.
 
 ## Update and rollback
 
