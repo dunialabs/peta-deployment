@@ -15,6 +15,7 @@ BACKEND_PORT=${BACKEND_PORT:-3002}
 CONSOLE_PORT=${CONSOLE_PORT:-3000}
 CORE_DB_PORT=${CORE_DB_PORT:-5434}
 CONSOLE_DB_PORT=${CONSOLE_DB_PORT:-5435}
+PETA_VERSION=${PETA_VERSION:-1.3.0}
 
 # ================== Color Definitions ==================
 RED='\033[0;31m'
@@ -357,7 +358,7 @@ EOF
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:latest
+    image: petaio/peta-core:${PETA_VERSION}
     container_name: peta-core
     restart: unless-stopped
     user: root
@@ -419,7 +420,7 @@ EOF
             cat >> "$compose_file" <<'EOF'
   # Peta Auth Service (optional, internal-only)
   peta-auth:
-    image: petaio/peta-auth:latest
+    image: petaio/peta-auth:${PETA_VERSION}
     container_name: peta-auth-core
     restart: unless-stopped
     networks:
@@ -478,7 +479,7 @@ EOF
 
   # Peta Console Service
   peta-console:
-    image: petaio/peta-console:latest
+    image: petaio/peta-console:${PETA_VERSION}
     container_name: peta-console
     restart: unless-stopped
     depends_on:
@@ -567,6 +568,7 @@ generate_env_file() {
 
 # -------------------- General Configuration --------------------
 NODE_ENV=production
+PETA_VERSION=${PETA_VERSION}
 
 EOF
 

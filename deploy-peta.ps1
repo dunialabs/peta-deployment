@@ -13,6 +13,7 @@ $BACKEND_PORT = if ($env:BACKEND_PORT) { $env:BACKEND_PORT } else { 3002 }
 $CONSOLE_PORT = if ($env:CONSOLE_PORT) { $env:CONSOLE_PORT } else { 3000 }
 $CORE_DB_PORT = if ($env:CORE_DB_PORT) { $env:CORE_DB_PORT } else { 5434 }
 $CONSOLE_DB_PORT = if ($env:CONSOLE_DB_PORT) { $env:CONSOLE_DB_PORT } else { 5435 }
+$PETA_VERSION = if ($env:PETA_VERSION) { $env:PETA_VERSION } else { "1.3.0" }
 
 # Script-level variable for compose command
 $script:COMPOSE_CMD = ""
@@ -293,7 +294,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:latest
+    image: petaio/peta-core:`${PETA_VERSION}
     container_name: peta-core
     restart: unless-stopped
     user: root
@@ -362,7 +363,7 @@ services:
             $content += @'
   # Peta Auth Service (optional, internal-only)
   peta-auth:
-    image: petaio/peta-auth:latest
+    image: petaio/peta-auth:${PETA_VERSION}
     container_name: peta-auth-core
     restart: unless-stopped
     networks:
@@ -422,7 +423,7 @@ services:
 
   # Peta Console Service
   peta-console:
-    image: petaio/peta-console:latest
+    image: petaio/peta-console:`${PETA_VERSION}
     container_name: peta-console
     restart: unless-stopped
     depends_on:
@@ -515,6 +516,7 @@ function New-EnvFile {
 
 # -------------------- General Configuration --------------------
 NODE_ENV=production
+PETA_VERSION=$PETA_VERSION
 
 "@
 
