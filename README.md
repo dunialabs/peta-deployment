@@ -31,14 +31,14 @@ Run the installer for the target platform and select the services to deploy:
 .\deploy-peta.ps1
 ```
 
-After a coordinated version is published, set `PETA_VERSION` before running an installer:
+After a coordinated version is published, set both image versions before running an installer:
 
 ```sh
-PETA_VERSION='X.Y.Z' ./deploy-peta.sh
+PETA_VERSION='X.Y.Z' PETA_AUTH_VERSION='X.Y.Z' ./deploy-peta.sh
 ```
 
 ```powershell
-$env:PETA_VERSION = 'X.Y.Z'; .\deploy-peta.ps1
+$env:PETA_VERSION = 'X.Y.Z'; $env:PETA_AUTH_VERSION = 'X.Y.Z'; .\deploy-peta.ps1
 ```
 
 The generated `.env` records `PETA_VERSION` and `PETA_AUTH_VERSION` and is restricted to the current OS user because it contains database and application secrets.
@@ -62,7 +62,8 @@ mounts both only into `peta-auth` at runtime.
 From the generated deployment directory, preserve the named volumes and update only the image version:
 
 ```sh
-# Edit .env and set PETA_VERSION to the target release, then:
+# For a coordinated update, set both PETA_VERSION and PETA_AUTH_VERSION.
+# Keep PETA_AUTH_VERSION unchanged for a Core/Console-only update, then:
 docker compose pull
 docker compose up -d
 ```
