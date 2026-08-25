@@ -249,6 +249,17 @@ if command -v pwsh >/dev/null 2>&1; then
             if (-not (Select-String -LiteralPath ".env" -SimpleMatch "PETA_AUTH_VERSION=1.3.0" -Quiet)) { throw "Auth version was not persisted" }
             $compose = Get-Content -LiteralPath "docker-compose.yml" -Raw
             if ($compose -notmatch 'petaio/peta-core:\$\{PETA_VERSION\}' -or $compose -notmatch 'petaio/peta-console:\$\{PETA_VERSION\}' -or $compose -notmatch 'petaio/peta-auth:\$\{PETA_AUTH_VERSION\}') { throw "service version override was not generated" }
+
+            $script:PETA_AUTH_AUTOSTART = "false"
+            New-EnvFile -DeployMode "1"
+            New-DockerCompose -DeployMode "1"
+            $compose = Get-Content -LiteralPath "docker-compose.yml" -Raw
+            if ($compose -notmatch "(?m)^services:\r?\n" -or $compose -notmatch "(?m)^volumes:\r?\n") { throw "Auth-disabled Compose top-level sections were concatenated" }
+            if ($compose -match "(?m)^\s{2}peta-auth:" -or $compose -match "(?m)^secrets:\r?$") { throw "Auth-disabled Compose retained Auth services or secrets" }
+            if (Get-Command docker -ErrorAction SilentlyContinue) {
+                & docker compose config --quiet
+                if ($LASTEXITCODE -ne 0) { throw "Auth-disabled Compose config was rejected" }
+            }
         }
         finally {
             Pop-Location

@@ -594,6 +594,7 @@ services:
 
     # Generate volumes configuration
     $content += @"
+
 volumes:
 "@
 
