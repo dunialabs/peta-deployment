@@ -14,6 +14,7 @@ $CONSOLE_PORT = if ($env:CONSOLE_PORT) { $env:CONSOLE_PORT } else { 3000 }
 $CORE_DB_PORT = if ($env:CORE_DB_PORT) { $env:CORE_DB_PORT } else { 5434 }
 $CONSOLE_DB_PORT = if ($env:CONSOLE_DB_PORT) { $env:CONSOLE_DB_PORT } else { 5435 }
 $PETA_VERSION = if ($env:PETA_VERSION) { $env:PETA_VERSION } else { "1.3.0" }
+$PETA_AUTH_VERSION = if ($env:PETA_AUTH_VERSION) { $env:PETA_AUTH_VERSION } else { "1.3.0" }
 
 # Script-level variable for compose command
 $script:COMPOSE_CMD = ""
@@ -192,15 +193,17 @@ function Wait-ForHealth {
 function Show-DeploymentInfo {
     param([string]$DeployDir = $DEPLOY_DIR)
 
-    $envFile = Join-Path $DeployDir ".env"
-    if (Test-Path $envFile) {
-        $envContent = Get-Content $envFile
+    $escapedDeployDir = $DeployDir.Replace("'", "''")
+    $literalDeployDir = "'$escapedDeployDir'"
+    $envFile = [System.IO.Path]::Combine($DeployDir, ".env")
+    if (Test-Path -LiteralPath $envFile) {
+        $envContent = Get-Content -LiteralPath $envFile
         $backendPort = ($envContent | Select-String "^BACKEND_PORT=").ToString().Split("=")[1]
         $consolePort = ($envContent | Select-String "^CONSOLE_PORT=").ToString().Split("=")[1]
 
         # Determine deployment mode
-        $composeFile = Join-Path $DeployDir "docker-compose.yml"
-        $composeContent = Get-Content $composeFile -Raw
+        $composeFile = [System.IO.Path]::Combine($DeployDir, "docker-compose.yml")
+        $composeContent = Get-Content -LiteralPath $composeFile -Raw
         $hasCore = $composeContent -match "peta-core:"
         $hasConsole = $composeContent -match "peta-console:"
         $hasAuth = $composeContent -match "peta-auth:"
@@ -237,13 +240,13 @@ function Show-DeploymentInfo {
         Write-Host ""
         Write-Host "Common Commands:" -ForegroundColor Cyan
         Write-Host "  View logs:      " -NoNewline
-        Write-Host "cd $DeployDir; $script:COMPOSE_CMD logs -f" -ForegroundColor Blue
+        Write-Host "Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD logs -f" -ForegroundColor Blue
         Write-Host "  View status:    " -NoNewline
-        Write-Host "cd $DeployDir; $script:COMPOSE_CMD ps" -ForegroundColor Blue
+        Write-Host "Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD ps" -ForegroundColor Blue
         Write-Host "  Stop services:  " -NoNewline
-        Write-Host "cd $DeployDir; $script:COMPOSE_CMD down" -ForegroundColor Blue
+        Write-Host "Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD down" -ForegroundColor Blue
         Write-Host "  Restart:        " -NoNewline
-        Write-Host "cd $DeployDir; $script:COMPOSE_CMD restart" -ForegroundColor Blue
+        Write-Host "Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD restart" -ForegroundColor Blue
         Write-Host "===========================================" -ForegroundColor Cyan
         Write-Host ""
     }
@@ -258,6 +261,126 @@ function Test-ExistingVolume {
 
     $volumes = docker volume ls --format "{{.Name}}" 2>$null
     return $volumes -contains $VolumeName
+}
+
+function Test-ExistingDeployment {
+    param([string]$Path)
+
+    return (Test-Path -LiteralPath ([System.IO.Path]::Combine($Path, "docker-compose.yml")) -PathType Leaf) -or
+        (Test-Path -LiteralPath ([System.IO.Path]::Combine($Path, ".env")) -PathType Leaf)
+}
+
+function Test-CurrentUserOnlyAcl {
+    param([string]$Path)
+
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = Get-Acl -LiteralPath $Path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($owner.Value -ne $currentUser.Value -or -not $acl.AreAccessRulesProtected) {
+        return $false
+    }
+
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+            $rule.IdentityReference.Value -ne $currentUser.Value) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-ValidPetaAuthRuntimeSecrets {
+    param([string]$SecretsDir = ".\secrets")
+
+    $masterKey = [System.IO.Path]::Combine($SecretsDir, "peta_auth_master_key")
+    $clientSecrets = [System.IO.Path]::Combine($SecretsDir, "peta_auth_client_secrets.json")
+
+    if (-not (Test-Path -LiteralPath $SecretsDir -PathType Container) -or
+        ((Get-Item -LiteralPath $SecretsDir -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+        -not (Test-CurrentUserOnlyAcl -Path $SecretsDir)) {
+        return $false
+    }
+
+    foreach ($path in @($masterKey, $clientSecrets)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return $false
+        }
+        if ((Get-Item -LiteralPath $path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            return $false
+        }
+        if (-not (Test-CurrentUserOnlyAcl -Path $path)) {
+            return $false
+        }
+    }
+
+    return (Get-Item -LiteralPath $masterKey).Length -eq 32 -and
+        (Get-Item -LiteralPath $clientSecrets).Length -gt 0
+}
+
+function Test-SafeNewDeploymentDirectory {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+    if (-not (Test-Path -LiteralPath $Path -PathType Container) -or
+        ((Get-Item -LiteralPath $Path -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return $false
+    }
+
+    $contents = @(Get-ChildItem -LiteralPath $Path -Force)
+    if ($contents.Count -eq 0) {
+        return $true
+    }
+    if ($contents.Count -ne 1 -or $contents[0].Name -ne "secrets" -or
+        -not $contents[0].PSIsContainer -or
+        ($contents[0].Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return $false
+    }
+
+    $secrets = @(Get-ChildItem -LiteralPath $contents[0].FullName -Force)
+    if ($secrets.Count -ne 2 -or
+        @($secrets | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or $_.Name -notin @("peta_auth_master_key", "peta_auth_client_secrets.json") }).Count -ne 0) {
+        return $false
+    }
+    $validSecrets = Test-ValidPetaAuthRuntimeSecrets -SecretsDir $contents[0].FullName
+    return $validSecrets
+}
+
+function Set-CurrentUserOnlyAcl {
+    param([string]$Path)
+
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $acl = if ((Get-Item -LiteralPath $Path -Force).PSIsContainer) {
+        New-Object System.Security.AccessControl.DirectorySecurity
+    }
+    else {
+        New-Object System.Security.AccessControl.FileSecurity
+    }
+    $acl.SetOwner($currentUser)
+    $acl.SetAccessRuleProtection($true, $false)
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $currentUser,
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.AccessControlType]::Allow
+    )
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+function Require-PetaAuthRuntimeSecrets {
+    $secretsDir = Join-Path "." "secrets"
+    $masterKey = Join-Path "." "secrets\peta_auth_master_key"
+    $clientSecrets = Join-Path "." "secrets\peta_auth_client_secrets.json"
+
+    if (-not (Test-ValidPetaAuthRuntimeSecrets -SecretsDir $secretsDir)) {
+        throw "Peta Auth requires a raw 32-byte master key and a non-empty client-secrets file"
+    }
+
+    foreach ($path in @($secretsDir, $masterKey, $clientSecrets)) {
+        Set-CurrentUserOnlyAcl -Path $path
+    }
 }
 
 # ================== Docker Compose Generation Functions ==================
@@ -369,13 +492,19 @@ services:
             $content += @'
   # Peta Auth Service (optional, internal-only)
   peta-auth:
-    image: petaio/peta-auth:${PETA_VERSION}
+    image: petaio/peta-auth:${PETA_AUTH_VERSION}
     container_name: peta-auth-core
     restart: unless-stopped
     networks:
       - peta-network
     volumes:
       - peta-auth-core-data:/data
+    environment:
+      PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key
+      PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json
+    secrets:
+      - peta_auth_master_key
+      - peta_auth_client_secrets_json
     healthcheck:
       test: ['CMD', '/usr/bin/bash', '-c', 'exec 3<>/dev/tcp/localhost/7788 || exit 1; printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; response=""; while IFS= read -r -t 2 line <&3; do response+="$$line"; done; [[ "$$response" == *"\"ok\":true"* ]]']
       interval: 10s
@@ -500,7 +629,18 @@ networks:
     driver: bridge
 "@
 
-    Set-Content -Path $composeFile -Value $content -Encoding UTF8
+    if ($script:PETA_AUTH_AUTOSTART -eq "true") {
+        $content += @"
+
+secrets:
+  peta_auth_master_key:
+    file: ./secrets/peta_auth_master_key
+  peta_auth_client_secrets_json:
+    file: ./secrets/peta_auth_client_secrets.json
+"@
+    }
+
+    Set-Content -LiteralPath $composeFile -Value $content -Encoding UTF8
     Log-Success "docker-compose.yml generated successfully"
 }
 
@@ -523,6 +663,7 @@ function New-EnvFile {
 # -------------------- General Configuration --------------------
 NODE_ENV=production
 PETA_VERSION=$PETA_VERSION
+PETA_AUTH_VERSION=$PETA_AUTH_VERSION
 
 "@
 
@@ -637,17 +778,8 @@ LOG_SYNC_RETRY_ATTEMPTS=2
 "@
     }
 
-    Set-Content -Path $envFile -Value $content -Encoding UTF8
-    $acl = New-Object System.Security.AccessControl.FileSecurity
-    $acl.SetOwner([System.Security.Principal.WindowsIdentity]::GetCurrent().User)
-    $acl.SetAccessRuleProtection($true, $false)
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        [System.Security.Principal.WindowsIdentity]::GetCurrent().User,
-        [System.Security.AccessControl.FileSystemRights]::FullControl,
-        [System.Security.AccessControl.AccessControlType]::Allow
-    )
-    $acl.AddAccessRule($rule)
-    Set-Acl -Path $envFile -AclObject $acl
+    Set-Content -LiteralPath $envFile -Value $content -Encoding UTF8
+    Set-CurrentUserOnlyAcl -Path $envFile
     Log-Success ".env file generated successfully"
     Log-Warn "Please keep the .env file secure, it contains sensitive password information"
 }
@@ -655,6 +787,9 @@ LOG_SYNC_RETRY_ATTEMPTS=2
 # ================== Main Function ==================
 
 function Main {
+    $escapedDeployDir = $DEPLOY_DIR.Replace("'", "''")
+    $literalDeployDir = "'$escapedDeployDir'"
+
     Log-Step "Peta Core & Console Unified Deployment Script"
     Write-Host ""
 
@@ -691,7 +826,7 @@ function Main {
 
     # Check if deployment directory already exists
     Log-Step "Checking deployment environment"
-    if (Test-Path $DEPLOY_DIR) {
+    if (Test-ExistingDeployment -Path $DEPLOY_DIR) {
         Log-Warn "Existing deployment detected: $DEPLOY_DIR"
         Write-Host ""
         Write-Host "Please choose an option:"
@@ -709,7 +844,7 @@ function Main {
         # Handle option 1: Direct start
         if ($existingChoice -eq "1") {
             Log-Step "Starting existing deployed services"
-            Push-Location $DEPLOY_DIR
+            Push-Location -LiteralPath $DEPLOY_DIR
 
             # Check if services are already running
             $runningServices = Invoke-DockerCompose ps --services --filter "status=running" 2>$null
@@ -721,7 +856,7 @@ function Main {
 
                 Show-DeploymentInfo -DeployDir "."
 
-                Log-Info "To restart services, run: cd $DEPLOY_DIR; $script:COMPOSE_CMD restart"
+                Log-Info "To restart services, run: Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD restart"
                 Pop-Location
                 exit 0
             }
@@ -747,10 +882,10 @@ function Main {
             Log-Warn "Complete redeployment requires manual execution of the following steps:"
             Write-Host ""
             Write-Host "Step 1: Stop and remove all containers, networks and volumes" -ForegroundColor Cyan
-            Write-Host "  cd $DEPLOY_DIR; $script:COMPOSE_CMD down -v; cd .." -ForegroundColor Blue
+            Write-Host "  Set-Location -LiteralPath $literalDeployDir; $script:COMPOSE_CMD down -v" -ForegroundColor Blue
             Write-Host ""
             Write-Host "Step 2: Remove deployment directory" -ForegroundColor Cyan
-            Write-Host "  Remove-Item -Recurse -Force $DEPLOY_DIR" -ForegroundColor Blue
+            Write-Host "  Remove-Item -LiteralPath $literalDeployDir -Recurse -Force" -ForegroundColor Blue
             Write-Host ""
             Write-Host "Step 3: Re-run deployment script" -ForegroundColor Cyan
             Write-Host "  .\deploy-peta.ps1" -ForegroundColor Blue
@@ -760,6 +895,9 @@ function Main {
             Log-Info "Please manually execute the above commands to complete redeployment"
             exit 0
         }
+    }
+    if (-not (Test-SafeNewDeploymentDirectory -Path $DEPLOY_DIR)) {
+        throw "Refusing to use $DEPLOY_DIR: it must be empty or contain only validated Peta Auth secrets"
     }
     Log-Success "Deployment environment check passed"
 
@@ -869,8 +1007,8 @@ function Main {
 
     # Create deployment directory
     Log-Step "Creating deployment directory"
-    New-Item -ItemType Directory -Force -Path $DEPLOY_DIR | Out-Null
-    Push-Location $DEPLOY_DIR
+    [System.IO.Directory]::CreateDirectory($DEPLOY_DIR) | Out-Null
+    Push-Location -LiteralPath $DEPLOY_DIR
     Log-Success "Deployment directory: $(Get-Location)"
 
     # Check existing volumes
@@ -890,18 +1028,27 @@ function Main {
     }
 
     # Generate configuration files
+    if ($script:PETA_AUTH_AUTOSTART -eq "true") {
+        Require-PetaAuthRuntimeSecrets
+    }
     New-DockerCompose -DeployMode $DEPLOY_MODE
     New-EnvFile -DeployMode $DEPLOY_MODE
 
     # Create cloudflared directory (if needed)
     if ($DEPLOY_MODE -eq "1" -or $DEPLOY_MODE -eq "2") {
         Log-Step "Creating Cloudflared configuration directory"
-        New-Item -ItemType Directory -Force -Path "cloudflared" | Out-Null
+        [System.IO.Directory]::CreateDirectory("cloudflared") | Out-Null
         Log-Success "Cloudflared configuration directory created"
     }
 
     # If existing database detected, prompt user
     if ($EXISTING_DB) {
+        $currentDir = (Get-Location).Path
+        $escapedCurrentDir = $currentDir.Replace("'", "''")
+        $literalCurrentDir = "'$escapedCurrentDir'"
+        $envFile = [System.IO.Path]::Combine($currentDir, ".env")
+        $literalEnvFile = "'$($envFile.Replace("'", "''"))'"
+
         Write-Host ""
         Log-Warn "════════════════════════════════════════════════════════"
         Log-Warn "  Existing database volume detected!"
@@ -911,17 +1058,17 @@ function Main {
         Write-Host ""
         Log-Info "Please follow these steps:"
         Write-Host "  1. Edit .env file to match existing database password:"
-        Write-Host "     notepad $(Get-Location)\.env" -ForegroundColor Blue
+        Write-Host "     notepad $literalEnvFile" -ForegroundColor Blue
         Write-Host ""
         Write-Host "  2. Modify the relevant configuration values"
         Write-Host ""
         Write-Host "  3. After modification, start services:"
-        Write-Host "     cd $(Get-Location); $script:COMPOSE_CMD up -d" -ForegroundColor Blue
+        Write-Host "     Set-Location -LiteralPath $literalCurrentDir; $script:COMPOSE_CMD up -d" -ForegroundColor Blue
         Write-Host ""
         Log-Info "Or, if you need a fresh deployment, delete old volumes first:"
         Write-Host "     docker volume ls" -ForegroundColor Blue
         Write-Host "     docker volume rm <volume_name>" -ForegroundColor Blue
-        Write-Host "     Remove-Item -Recurse -Force $(Get-Location)" -ForegroundColor Blue
+        Write-Host "     Remove-Item -LiteralPath $literalCurrentDir -Recurse -Force" -ForegroundColor Blue
         Write-Host "     Then re-run the deployment script"
         Write-Host ""
         Pop-Location
@@ -1102,11 +1249,13 @@ function Main {
 
 # ================== Entry Point ==================
 
-try {
-    Main
-}
-catch {
-    Log-Error "Error occurred during deployment: $_"
-    Log-Error $_.ScriptStackTrace
-    exit 1
+if ($MyInvocation.InvocationName -ne '.') {
+    try {
+        Main
+    }
+    catch {
+        Log-Error "Error occurred during deployment: $_"
+        Log-Error $_.ScriptStackTrace
+        exit 1
+    }
 }

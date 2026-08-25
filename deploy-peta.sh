@@ -15,6 +15,7 @@ CONSOLE_PORT=${CONSOLE_PORT:-3000}
 CORE_DB_PORT=${CORE_DB_PORT:-5434}
 CONSOLE_DB_PORT=${CONSOLE_DB_PORT:-5435}
 PETA_VERSION=${PETA_VERSION:-1.3.0}
+PETA_AUTH_VERSION=${PETA_AUTH_VERSION:-1.3.0}
 
 # ================== Color Definitions ==================
 RED='\033[0;31m'
@@ -161,6 +162,9 @@ wait_for_health() {
 # Read ports and deployment mode from .env file
 show_deployment_info() {
     local deploy_dir=${1:-$DEPLOY_DIR}
+    local quoted_deploy_dir
+
+    printf -v quoted_deploy_dir '%q' "$deploy_dir"
 
     # Read .env file to get ports and deployment mode
     if [ -f "$deploy_dir/.env" ]; then
@@ -205,10 +209,10 @@ show_deployment_info() {
 
         echo "" >&2
         echo -e "${CYAN}Common Commands:${NC}" >&2
-        echo -e "  View logs:      ${BLUE}cd ${deploy_dir} && $COMPOSE_CMD logs -f${NC}" >&2
-        echo -e "  View status:    ${BLUE}cd ${deploy_dir} && $COMPOSE_CMD ps${NC}" >&2
-        echo -e "  Stop services:  ${BLUE}cd ${deploy_dir} && $COMPOSE_CMD down${NC}" >&2
-        echo -e "  Restart:        ${BLUE}cd ${deploy_dir} && $COMPOSE_CMD restart${NC}" >&2
+        echo -e "  View logs:      ${BLUE}cd -- ${quoted_deploy_dir} && $COMPOSE_CMD logs -f${NC}" >&2
+        echo -e "  View status:    ${BLUE}cd -- ${quoted_deploy_dir} && $COMPOSE_CMD ps${NC}" >&2
+        echo -e "  Stop services:  ${BLUE}cd -- ${quoted_deploy_dir} && $COMPOSE_CMD down${NC}" >&2
+        echo -e "  Restart:        ${BLUE}cd -- ${quoted_deploy_dir} && $COMPOSE_CMD restart${NC}" >&2
         echo -e "${CYAN}===========================================${NC}" >&2
         echo "" >&2
     else
@@ -223,6 +227,82 @@ check_existing_volumes() {
         return 0
     fi
     return 1
+}
+
+has_existing_deployment() {
+    local deploy_dir="$1"
+    [ -f "$deploy_dir/docker-compose.yml" ] || [ -f "$deploy_dir/.env" ]
+}
+
+stat_secret_path() {
+    local gnu_format="$1"
+    local bsd_format="$2"
+    local path="$3"
+
+    if stat -c "$gnu_format" "$path" >/dev/null 2>&1; then
+        stat -c "$gnu_format" "$path"
+    else
+        stat -f "$bsd_format" "$path"
+    fi
+}
+
+has_valid_peta_auth_runtime_secrets() {
+    local secrets_dir="${1:-./secrets}"
+    local master_key="$secrets_dir/peta_auth_master_key"
+    local client_secrets="$secrets_dir/peta_auth_client_secrets.json"
+    local path mode owner
+
+    if [ ! -d "$secrets_dir" ] || [ -L "$secrets_dir" ]; then
+        return 1
+    fi
+    mode="$(stat_secret_path '%a' '%Lp' "$secrets_dir")"
+    owner="$(stat_secret_path '%u' '%u' "$secrets_dir")"
+    if [ "$owner" != "$(id -u)" ] || [ $((8#$mode & 077)) -ne 0 ]; then
+        return 1
+    fi
+
+    for path in "$master_key" "$client_secrets"; do
+        if [ ! -f "$path" ] || [ -L "$path" ] || [ ! -r "$path" ]; then
+            return 1
+        fi
+        mode="$(stat_secret_path '%a' '%Lp' "$path")"
+        owner="$(stat_secret_path '%u' '%u' "$path")"
+        if [ "$owner" != "$(id -u)" ] || [ $((8#$mode & 077)) -ne 0 ]; then
+            return 1
+        fi
+    done
+
+    if [ "$(wc -c < "$master_key")" -ne 32 ] || [ ! -s "$client_secrets" ]; then
+        return 1
+    fi
+}
+
+is_safe_new_deployment_directory() {
+    local deploy_dir="$1"
+    local secrets_dir="$deploy_dir/secrets"
+
+    [ ! -e "$deploy_dir" ] && return 0
+    [ -d "$deploy_dir" ] && [ ! -L "$deploy_dir" ] && [ -r "$deploy_dir" ] && [ -x "$deploy_dir" ] || return 1
+
+    if ! find "$deploy_dir" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        return 0
+    fi
+    if find "$deploy_dir" -mindepth 1 -maxdepth 1 ! -name secrets -print -quit | grep -q .; then
+        return 1
+    fi
+    [ -d "$secrets_dir" ] && [ ! -L "$secrets_dir" ] && [ -r "$secrets_dir" ] && [ -x "$secrets_dir" ] || return 1
+    if find "$secrets_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit | grep -q . ||
+       find "$secrets_dir" -mindepth 1 -maxdepth 1 -type f ! \( -name peta_auth_master_key -o -name peta_auth_client_secrets.json \) -print -quit | grep -q .; then
+        return 1
+    fi
+    has_valid_peta_auth_runtime_secrets "$secrets_dir"
+}
+
+require_peta_auth_runtime_secrets() {
+    if ! has_valid_peta_auth_runtime_secrets; then
+        log_error "Peta Auth requires current-user-only, readable runtime secrets in ./secrets"
+        return 1
+    fi
 }
 
 # ================== Docker Compose Generation Functions ==================
@@ -327,13 +407,19 @@ EOF
             cat >> "$compose_file" <<'EOF'
   # Peta Auth Service (optional, internal-only)
   peta-auth:
-    image: petaio/peta-auth:${PETA_VERSION}
+    image: petaio/peta-auth:${PETA_AUTH_VERSION}
     container_name: peta-auth-core
     restart: unless-stopped
     networks:
       - peta-network
     volumes:
       - peta-auth-core-data:/data
+    environment:
+      PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key
+      PETA_AUTH_CLIENT_SECRETS_FILE: /run/secrets/peta_auth_client_secrets_json
+    secrets:
+      - peta_auth_master_key
+      - peta_auth_client_secrets_json
     healthcheck:
       test: ['CMD', '/usr/bin/bash', '-c', 'exec 3<>/dev/tcp/localhost/7788 || exit 1; printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; response=""; while IFS= read -r -t 2 line <&3; do response+="$$line"; done; [[ "$$response" == *"\"ok\":true"* ]]']
       interval: 10s
@@ -454,6 +540,17 @@ networks:
     driver: bridge
 EOF
 
+    if [ "$PETA_AUTH_AUTOSTART" = "true" ]; then
+        cat >> "$compose_file" <<'EOF'
+
+secrets:
+  peta_auth_master_key:
+    file: ./secrets/peta_auth_master_key
+  peta_auth_client_secrets_json:
+    file: ./secrets/peta_auth_client_secrets.json
+EOF
+    fi
+
     log_success "docker-compose.yml generated successfully"
 }
 
@@ -477,6 +574,7 @@ generate_env_file() {
 # -------------------- General Configuration --------------------
 NODE_ENV=production
 PETA_VERSION=${PETA_VERSION}
+PETA_AUTH_VERSION=${PETA_AUTH_VERSION}
 
 EOF
 
@@ -599,6 +697,9 @@ EOF
 # ================== Main Function ==================
 
 main() {
+    local quoted_deploy_dir
+
+    printf -v quoted_deploy_dir '%q' "$DEPLOY_DIR"
     log_step "Peta Core & Console Unified Deployment Script"
     echo ""
 
@@ -622,7 +723,7 @@ main() {
 
     # Check if deployment directory already exists
     log_step "Checking deployment environment"
-    if [ -d "$DEPLOY_DIR" ]; then
+    if has_existing_deployment "$DEPLOY_DIR"; then
         log_warn "Existing deployment detected: $DEPLOY_DIR"
         echo ""
         echo "Please choose an option:"
@@ -640,7 +741,7 @@ main() {
         # Handle option 1: Direct start
         if [ "$existing_choice" = "1" ]; then
             log_step "Starting existing deployed services"
-            cd $DEPLOY_DIR
+            cd -- "$DEPLOY_DIR"
 
             # Check if services are already running
             if $COMPOSE_CMD ps --services --filter "status=running" 2>/dev/null | grep -q .; then
@@ -652,7 +753,7 @@ main() {
                 # Display deployment info (already cd to deployment dir, use current dir)
                 show_deployment_info "."
 
-                log_info "To restart services, run: cd $DEPLOY_DIR && $COMPOSE_CMD restart"
+                log_info "To restart services, run: cd -- $quoted_deploy_dir && $COMPOSE_CMD restart"
                 exit 0
             fi
 
@@ -676,10 +777,10 @@ main() {
             log_warn "Complete redeployment requires manual execution of the following steps:"
             echo ""
             echo -e "${CYAN}Step 1: Stop and remove all containers, networks and volumes${NC}"
-            echo -e "  ${BLUE}cd $DEPLOY_DIR && $COMPOSE_CMD down -v && cd ../${NC}"
+            echo -e "  ${BLUE}cd -- $quoted_deploy_dir && $COMPOSE_CMD down -v && cd ../${NC}"
             echo ""
             echo -e "${CYAN}Step 2: Remove deployment directory${NC}"
-            echo -e "  ${BLUE}rm -rf $DEPLOY_DIR${NC}"
+            echo -e "  ${BLUE}rm -rf -- $quoted_deploy_dir${NC}"
             echo ""
             echo -e "${CYAN}Step 3: Re-run deployment script${NC}"
             echo -e "  ${BLUE}./deploy-peta.sh${NC}"
@@ -689,6 +790,10 @@ main() {
             log_info "Please manually execute the above commands to complete redeployment"
             exit 0
         fi
+    fi
+    if ! is_safe_new_deployment_directory "$DEPLOY_DIR"; then
+        log_error "Refusing to use $DEPLOY_DIR: it must be empty or contain only validated Peta Auth secrets"
+        exit 1
     fi
     log_success "Deployment environment check passed"
 
@@ -800,8 +905,8 @@ main() {
 
     # Create deployment directory
     log_step "Creating deployment directory"
-    mkdir -p $DEPLOY_DIR
-    cd $DEPLOY_DIR
+    mkdir -p -- "$DEPLOY_DIR"
+    cd -- "$DEPLOY_DIR"
     log_success "Deployment directory: $(pwd)"
 
     # Check existing volumes
@@ -821,6 +926,9 @@ main() {
     fi
 
     # Generate configuration files
+    if [ "$PETA_AUTH_AUTOSTART" = "true" ]; then
+        require_peta_auth_runtime_secrets
+    fi
     generate_docker_compose "$DEPLOY_MODE"
     generate_env_file "$DEPLOY_MODE"
 
@@ -833,6 +941,10 @@ main() {
 
     # If existing database detected, prompt user
     if [ "$EXISTING_DB" = true ]; then
+        local quoted_current_dir quoted_env_file
+
+        printf -v quoted_current_dir '%q' "$PWD"
+        printf -v quoted_env_file '%q' "$PWD/.env"
         echo ""
         log_warn "════════════════════════════════════════════════════════"
         log_warn "  Existing database volume detected!"
@@ -842,17 +954,17 @@ main() {
         echo ""
         log_info "Please follow these steps:"
         echo -e "  1. Edit .env file to match existing database password:"
-        echo -e "     ${BLUE}vi $(pwd)/.env${NC}"
+        echo -e "     ${BLUE}vi -- $quoted_env_file${NC}"
         echo ""
         echo -e "  2. Modify the relevant configuration values"
         echo ""
         echo -e "  3. After modification, start services:"
-        echo -e "     ${BLUE}cd $(pwd) && $COMPOSE_CMD up -d${NC}"
+        echo -e "     ${BLUE}cd -- $quoted_current_dir && $COMPOSE_CMD up -d${NC}"
         echo ""
         log_info "Or, if you need a fresh deployment, delete old volumes first:"
         echo -e "     ${BLUE}docker volume ls${NC}"
         echo -e "     ${BLUE}docker volume rm <volume_name>${NC}"
-        echo -e "     ${BLUE}rm -rf $(pwd)${NC}"
+        echo -e "     ${BLUE}rm -rf -- $quoted_current_dir${NC}"
         echo -e "     Then re-run the deployment script"
         echo ""
         exit 0
