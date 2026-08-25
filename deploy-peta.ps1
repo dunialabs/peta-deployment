@@ -77,7 +77,7 @@ function Generate-Password {
     finally {
         $rng.Dispose()
     }
-    return [Convert]::ToBase64String($bytes).Substring(0, $Length)
+    return [Convert]::ToBase64String($bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=').Substring(0, $Length)
 }
 
 # Check if command exists
@@ -897,7 +897,7 @@ function Main {
         }
     }
     if (-not (Test-SafeNewDeploymentDirectory -Path $DEPLOY_DIR)) {
-        throw "Refusing to use $DEPLOY_DIR: it must be empty or contain only validated Peta Auth secrets"
+        throw "Refusing to use ${DEPLOY_DIR}: it must be empty or contain only validated Peta Auth secrets"
     }
     Log-Success "Deployment environment check passed"
 

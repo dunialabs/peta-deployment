@@ -181,12 +181,23 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
     trap - EXIT
 done
 
+node -e 'const raw = Buffer.from([0xff]).toString("base64").slice(0, 2); const parsed = new URL("postgresql://peta:" + raw + "@postgres-core:5432/peta_core_postgres"); if (parsed.host === "postgres-core:5432") process.exit(1)'
+awk '/function Generate-Password/,/^}/' "$repo_dir/deploy-peta.ps1" | grep -Fq "ToBase64String(\$bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=')"
+
 if command -v pwsh >/dev/null 2>&1; then
     work_dir="$(mktemp -d)"
     trap 'rm -rf "$work_dir"' EXIT
 
     PS_SCRIPT="$repo_dir/deploy-peta.ps1" PETA_DEPLOY_TEST_DIR="$work_dir/peta-deployment" pwsh -NoProfile -NonInteractive -Command '
+        $tokens = $null
+        $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($env:PS_SCRIPT, [ref]$tokens, [ref]$errors)
+        if ($errors.Count -ne 0) { throw "deploy-peta.ps1 must parse without errors" }
         . $env:PS_SCRIPT
+        1..100 | ForEach-Object {
+            $password = Generate-Password -Length 24
+            if ($password.Length -ne 24 -or $password -notmatch "^[A-Za-z0-9_-]+$") { throw "generated database password is not URL-safe" }
+        }
         $dir = $env:PETA_DEPLOY_TEST_DIR
         $literalDir = [System.IO.Path]::Combine((Split-Path -LiteralPath $dir -Parent), "peta deploy [literal]*")
         [System.IO.Directory]::CreateDirectory($literalDir) | Out-Null
@@ -248,6 +259,7 @@ if command -v pwsh >/dev/null 2>&1; then
     trap - EXIT
 else
     grep -q 'RandomNumberGenerator.*Create' "$repo_dir/deploy-peta.ps1"
+    ! grep -q '\$DEPLOY_DIR:' "$repo_dir/deploy-peta.ps1"
     grep -q 'SetAccessRuleProtection' "$repo_dir/deploy-peta.ps1"
     grep -q 'function Test-CurrentUserOnlyAcl' "$repo_dir/deploy-peta.ps1"
     awk '/function Test-CurrentUserOnlyAcl/,/^}/' "$repo_dir/deploy-peta.ps1" | grep -q 'GetOwner'
