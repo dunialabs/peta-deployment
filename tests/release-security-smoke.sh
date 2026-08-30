@@ -15,6 +15,13 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
         PETA_AUTH_AUTOSTART=false
         source "$repo_dir/$installer"
 
+        set +e
+        eof_output="$( (ulimit -t 1; prompt_for_port "test port" 3002 "" </dev/null) 2>&1)"
+        eof_status=$?
+        set -e
+        [[ "$eof_status" -eq 1 ]]
+        grep -Fq 'Input closed before a replacement port was provided' <<< "$eof_output"
+
         first="$(generate_password 32)"
         second="$(generate_password 32)"
         [[ ${#first} -eq 32 && ${#second} -eq 32 && "$first" != "$second" ]]
@@ -130,6 +137,9 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
     trap 'rm -rf "$main_work_dir"' EXIT
     mkdir "$main_work_dir/bin" "$main_work_dir/peta-deployment"
     ln -s /usr/bin/true "$main_work_dir/bin/docker"
+    ln -s /usr/bin/false "$main_work_dir/bin/lsof"
+    ln -s /usr/bin/false "$main_work_dir/bin/netstat"
+    ln -s /usr/bin/false "$main_work_dir/bin/ss"
     touch "$main_work_dir/peta-deployment/operator-notes.txt"
     ! (
         cd "$main_work_dir"
@@ -165,6 +175,9 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
     mkdir "$main_work_dir/volume-bin"
     printf '%s\n' '#!/bin/bash' 'if [ "$1" = volume ] && [ "$2" = ls ]; then printf "%s\\n" postgres_peta_core; fi' 'exit 0' > "$main_work_dir/volume-bin/docker"
     chmod +x "$main_work_dir/volume-bin/docker"
+    ln -s /usr/bin/false "$main_work_dir/volume-bin/lsof"
+    ln -s /usr/bin/false "$main_work_dir/volume-bin/netstat"
+    ln -s /usr/bin/false "$main_work_dir/volume-bin/ss"
     literal_volume_dir="$main_work_dir/existing db [literal]*"
     printf '2\nn\n' | (
         cd "$main_work_dir"

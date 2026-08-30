@@ -186,7 +186,11 @@ prompt_for_port() {
             first_attempt=false
         fi
 
-        read -p "Please enter a new port number (1024-65535) or 'q' to quit: " new_port
+        if ! read -r -p "Please enter a new port number (1024-65535) or 'q' to quit: " new_port; then
+            echo "" >&2
+            log_error "Input closed before a replacement port was provided"
+            return 1
+        fi
 
         # Check if user wants to exit
         if [[ "$new_port" == "q" ]] || [[ "$new_port" == "quit" ]]; then
