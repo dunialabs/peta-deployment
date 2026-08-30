@@ -1,7 +1,8 @@
 # Peta Deployment
 
-> Pre-publication status: `1.3.0` is prepared but is not installable until the
-> Core, Console, and Auth `1.3.0` multi-architecture images are published.
+> Peta `1.3.0` is published for `linux/amd64` and `linux/arm64`. Production
+> deployments should use the versioned tags; this release does not publish
+> `latest`.
 
 This installer generates a Docker Compose deployment for the matching Peta release.
 
@@ -13,7 +14,7 @@ See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for the current release changes and u
 - `bcdunia/peta-console:${PETA_VERSION}`: web console.
 - `bcdunia/peta-auth:${PETA_AUTH_VERSION}`: optional internal authentication service.
 
-The next release is `1.3.0`. New installers default both `PETA_VERSION` and
+The current release is `1.3.0`. New installers default both `PETA_VERSION` and
 `PETA_AUTH_VERSION` to `1.3.0`; Core and Console use `PETA_VERSION`, while Auth
 uses `PETA_AUTH_VERSION` so a Core/Console rollback does not downgrade Auth.
 
@@ -31,7 +32,7 @@ Run the installer for the target platform and select the services to deploy:
 .\deploy-peta.ps1
 ```
 
-After a coordinated version is published, set both image versions before running an installer:
+To select an explicit coordinated version, set both image versions before running an installer:
 
 ```sh
 PETA_VERSION='X.Y.Z' PETA_AUTH_VERSION='X.Y.Z' ./deploy-peta.sh
