@@ -423,7 +423,7 @@ services:
 
   # Peta Core Service (MCP Gateway)
   peta-core:
-    image: petaio/peta-core:`${PETA_VERSION}
+    image: bcdunia/peta-core:`${PETA_VERSION}
     container_name: peta-core
     restart: unless-stopped
     user: root
@@ -492,7 +492,7 @@ services:
             $content += @'
   # Peta Auth Service (optional, internal-only)
   peta-auth:
-    image: petaio/peta-auth:${PETA_AUTH_VERSION}
+    image: bcdunia/peta-auth:${PETA_AUTH_VERSION}
     container_name: peta-auth-core
     restart: unless-stopped
     networks:
@@ -558,7 +558,7 @@ services:
 
   # Peta Console Service
   peta-console:
-    image: petaio/peta-console:`${PETA_VERSION}
+    image: bcdunia/peta-console:`${PETA_VERSION}
     container_name: peta-console
     restart: unless-stopped
     depends_on:

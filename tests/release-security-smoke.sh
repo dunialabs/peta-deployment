@@ -86,14 +86,14 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
         docker compose --env-file .env config --format json > compose-true.json
         node -e 'const compose = require("./compose-true.json"); const names = Object.keys(compose.secrets || {}).sort(); if (names.join(",") !== "peta_auth_client_secrets_json,peta_auth_master_key") process.exit(1); for (const [name, service] of Object.entries(compose.services)) { if (name !== "peta-auth" && service.secrets) process.exit(1) }; const auth = compose.services["peta-auth"]; if (!auth || auth.secrets.length !== 2) process.exit(1)'
 
-        PETA_VERSION=1.2.9
+        PETA_VERSION=1.2.0
         PETA_AUTH_VERSION=1.3.0
         generate_env_file 1 >/dev/null 2>&1
-        grep -qx 'PETA_VERSION=1.2.9' .env
+        grep -qx 'PETA_VERSION=1.2.0' .env
         grep -qx 'PETA_AUTH_VERSION=1.3.0' .env
         generate_docker_compose 1 >/dev/null
         docker compose --env-file .env config --format json > compose-rollback.json
-        node -e 'const compose = require("./compose-rollback.json"); const expected = { "peta-core": "petaio/peta-core:1.2.9", "peta-console": "petaio/peta-console:1.2.9", "peta-auth": "petaio/peta-auth:1.3.0" }; for (const [name, image] of Object.entries(expected)) if (compose.services[name]?.image !== image) process.exit(1)'
+        node -e 'const compose = require("./compose-rollback.json"); const expected = { "peta-core": "bcdunia/peta-core:1.2.0", "peta-console": "bcdunia/peta-console:1.2.0", "peta-auth": "bcdunia/peta-auth:1.3.0" }; for (const [name, image] of Object.entries(expected)) if (compose.services[name]?.image !== image) process.exit(1)'
     )
 
     rm -rf "$work_dir"
@@ -241,14 +241,14 @@ if command -v pwsh >/dev/null 2>&1; then
         try {
             $script:PETA_AUTH_AUTOSTART = "true"
             Require-PetaAuthRuntimeSecrets
-            $PETA_VERSION = "1.2.9"
+            $PETA_VERSION = "1.2.0"
             $PETA_AUTH_VERSION = "1.3.0"
             New-EnvFile -DeployMode "1"
             New-DockerCompose -DeployMode "1"
             if (-not (Select-String -LiteralPath "docker-compose.yml" -SimpleMatch "PETA_AUTH_MASTER_KEY_FILE: /run/secrets/peta_auth_master_key" -Quiet)) { throw "Auth secret mount was not generated" }
             if (-not (Select-String -LiteralPath ".env" -SimpleMatch "PETA_AUTH_VERSION=1.3.0" -Quiet)) { throw "Auth version was not persisted" }
             $compose = Get-Content -LiteralPath "docker-compose.yml" -Raw
-            if ($compose -notmatch 'petaio/peta-core:\$\{PETA_VERSION\}' -or $compose -notmatch 'petaio/peta-console:\$\{PETA_VERSION\}' -or $compose -notmatch 'petaio/peta-auth:\$\{PETA_AUTH_VERSION\}') { throw "service version override was not generated" }
+            if ($compose -notmatch 'bcdunia/peta-core:\$\{PETA_VERSION\}' -or $compose -notmatch 'bcdunia/peta-console:\$\{PETA_VERSION\}' -or $compose -notmatch 'bcdunia/peta-auth:\$\{PETA_AUTH_VERSION\}') { throw "service version override was not generated" }
 
             $script:PETA_AUTH_AUTOSTART = "false"
             New-EnvFile -DeployMode "1"
@@ -286,7 +286,7 @@ else
     grep -q 'peta_auth_client_secrets_json' "$repo_dir/deploy-peta.ps1"
     grep -q 'GET /healthz HTTP/1.1' "$repo_dir/deploy-peta.ps1"
     grep -q '\$PETA_AUTH_VERSION = if (\$env:PETA_AUTH_VERSION) { \$env:PETA_AUTH_VERSION } else { "1.3.0" }' "$repo_dir/deploy-peta.ps1"
-    grep -q 'image: petaio/peta-auth:${PETA_AUTH_VERSION}' "$repo_dir/deploy-peta.ps1"
+    grep -q 'image: bcdunia/peta-auth:${PETA_AUTH_VERSION}' "$repo_dir/deploy-peta.ps1"
     grep -q 'Push-Location -LiteralPath \$DEPLOY_DIR' "$repo_dir/deploy-peta.ps1"
     grep -q '\[System.IO.Directory\]::CreateDirectory(\$DEPLOY_DIR)' "$repo_dir/deploy-peta.ps1"
     grep -q 'Remove-Item -LiteralPath \$literalDeployDir -Recurse -Force' "$repo_dir/deploy-peta.ps1"

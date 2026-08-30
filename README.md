@@ -9,9 +9,9 @@ See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for the current release changes and u
 
 ## Images
 
-- `petaio/peta-core:${PETA_VERSION}`: MCP gateway and control plane.
-- `petaio/peta-console:${PETA_VERSION}`: web console.
-- `petaio/peta-auth:${PETA_AUTH_VERSION}`: optional internal authentication service.
+- `bcdunia/peta-core:${PETA_VERSION}`: MCP gateway and control plane.
+- `bcdunia/peta-console:${PETA_VERSION}`: web console.
+- `bcdunia/peta-auth:${PETA_AUTH_VERSION}`: optional internal authentication service.
 
 The next release is `1.3.0`. New installers default both `PETA_VERSION` and
 `PETA_AUTH_VERSION` to `1.3.0`; Core and Console use `PETA_VERSION`, while Auth
@@ -68,10 +68,13 @@ docker compose pull
 docker compose up -d
 ```
 
-For a normal coordinated install, both values default to `1.3.0`. To roll Core and Console back while keeping Auth at its compatible release, set the generated `.env` as follows and run the same two commands:
+For a normal coordinated install, both values default to `1.3.0`. The verified
+rollback target in the `bcdunia` namespace is Core and Console `1.2.0`. To use
+it while keeping Auth at its compatible release, set the generated `.env` as
+follows and run the same two commands:
 
 ```dotenv
-PETA_VERSION=PREVIOUS_CORE_CONSOLE_VERSION
+PETA_VERSION=1.2.0
 PETA_AUTH_VERSION=1.3.0
 ```
 
