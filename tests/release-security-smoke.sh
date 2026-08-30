@@ -22,6 +22,15 @@ for installer in deploy-peta.sh deploy-peta-linux.sh; do
         [[ "$eof_status" -eq 1 ]]
         grep -Fq 'Input closed before a replacement port was provided' <<< "$eof_output"
 
+        mkdir volume-match-bin
+        printf '%s\n' '#!/bin/bash' 'if [ "$1" = volume ] && [ "$2" = ls ]; then printf "%s\\n" deployment_postgres_peta_core postgres_peta_core_backup; fi' 'exit 0' > volume-match-bin/docker
+        chmod +x volume-match-bin/docker
+        (
+            PATH="$work_dir/volume-match-bin:$PATH"
+            hash -r
+            ! check_existing_volumes postgres_peta_core
+        )
+
         first="$(generate_password 32)"
         second="$(generate_password 32)"
         [[ ${#first} -eq 32 && ${#second} -eq 32 && "$first" != "$second" ]]

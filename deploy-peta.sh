@@ -227,7 +227,7 @@ show_deployment_info() {
 # Check existing volumes
 check_existing_volumes() {
     local volume_name=$1
-    if docker volume ls | grep -q "${volume_name}" 2>/dev/null; then
+    if docker volume ls --format '{{.Name}}' 2>/dev/null | grep -Fqx -- "$volume_name"; then
         return 0
     fi
     return 1

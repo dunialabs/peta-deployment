@@ -43,6 +43,7 @@ Platform manifests:
 - Changed the unified macOS, Linux, and Windows installers to pin Core and Console with `PETA_VERSION` and Auth with `PETA_AUTH_VERSION`; both default to `1.3.0` for a coordinated installation.
 - Fixed Windows PowerShell generation with Auth disabled so Compose top-level `services` and `volumes` sections remain separate and valid.
 - Made the macOS/Linux replacement-port prompt fail closed on end-of-input instead of spinning and producing unbounded error logs in non-interactive runs.
+- Made macOS/Linux existing-database detection match exact Docker volume names so unrelated similarly named volumes no longer block a fresh install.
 - Changed installer secret generation to use operating-system cryptographic randomness and restrict generated `.env` files to the current user.
 - When `PETA_AUTH_AUTOSTART=true`, installers now require a pre-provisioned raw 32-byte `./secrets/peta_auth_master_key` and non-empty encrypted `./secrets/peta_auth_client_secrets.json`. They enforce current-user-only access, keep both values out of `.env` and output, and mount them only into `peta-auth`.
 - Peta does not expose or retain previous credential values as a recovery history. Keep protected prior secret material and rotation records outside Peta when your rollback policy requires them.
